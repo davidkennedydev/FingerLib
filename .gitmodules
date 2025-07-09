@@ -1,0 +1,9 @@
+[submodule "deps/Almond_PCB"]
+	path = deps/Almond_PCB
+	url = git@github.com:Open-Bionics/Almond_PCB.git
+[submodule "deps/ArduinoCore-avr"]
+	path = deps/ArduinoCore-avr
+	url = git@github.com:arduino/ArduinoCore-avr.git
+[submodule "deps/ArduinoCore-API"]
+	path = deps/ArduinoCore-API
+	url = git@github.com:arduino/ArduinoCore-API.git
