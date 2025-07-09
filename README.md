@@ -24,3 +24,20 @@ To view a copy of this license, visit http://creativecommons.org/licenses/by-sa/
 <ollymcbride@openbionics.com> wrote this file. As long as you retain this notice you
 can do whatever you want with this stuff. If we meet some day, and you think
 this stuff is worth it, you can buy me a beer in return Olly McBride
+
+
+## Development Instructions
+
+### How to build the project
+
+For **the first time** you clone the project fetch the dependecies using the following `git` command:
+
+```
+git submodule update --init 
+```
+
+To build and rebuild the project use the following GNU Make command:
+
+```
+make
+```
