@@ -306,16 +306,10 @@ void Finger::writeSpeed(int value) {
 
 // return the current movement speed
 float Finger::readSpeed() {
-  // pauseInterrupt();				// pause 'control()' interrupt
-  // to prevent a race condition
-
   calcVel(); // read finger speed (ADC/per)
   _velBuff.write(_speed.raw);
   _speed.prev = _speed.curr;
   _speed.curr = _velBuff.readMean();
-
-  // resumeInterrupt();			// resume 'control()' interrupt to
-  // prevent a race condition
 
   return _speed.raw;
 }
@@ -449,160 +443,12 @@ void Finger::disableInterrupt() {
   _interruptEn = false;
 }
 
-// PRINT
-
-//// print the current position (no new line)
-// void Finger::printPos(void)
-//{
-//	printPos(0);
-// }
-//
-//// print the current position (new line)
-// void Finger::printPos(bool newL)
-//{
-//	MYSERIAL.print("Pos ");
-//	MYSERIAL.print(readPos());
-//	MYSERIAL.print("  ");
-//	if (newL)
-//		MYSERIAL.print("\n");
-// }
-//
-//// print the current position error (no new line)
-// void Finger::printPosError(void)
-//{
-//	printPosError(0);
-// }
-//
-//// print the current position error (new line)
-// void Finger::printPosError(bool newL)
-//{
-//	MYSERIAL.print("Err ");
-//	MYSERIAL.print(readPosError());
-//	MYSERIAL.print("  ");
-//	if (newL)
-//		MYSERIAL.print("\n");
-// }
-//
-//// print the current direction (no new line)
-// void Finger::printDir(void)
-//{
-//	printDir(0);
-// }
-//
-//// print the current direction (new line)
-// void Finger::printDir(bool newL)
-//{
-//	const char* _dirString[2] = { "OPEN","CLOSE" };	// direction string
-//
-//	MYSERIAL.print("Dir ");
-//	MYSERIAL.print(_dirString[readDir()]);
-//	MYSERIAL.print("  ");
-//	if (newL)
-//		MYSERIAL.print("\n");
-// }
-//
-//// print whether the target position has been reached (no new line)
-// void Finger::printReached(void)
-//{
-//	printReached(0);
-// }
-//
-//// print whether the target position has been reached (new line)
-// void Finger::printReached(bool newL)
-//{
-//	MYSERIAL.print("Reached ");
-//	MYSERIAL.print(reachedPos());
-//	MYSERIAL.print("  ");
-//	if (newL)
-//		MYSERIAL.print("\n");
-// }
-//
-//// print the current speed (no new line)
-// void Finger::printSpeed(void)
-//{
-//	printSpeed(0);
-// }
-//
-//// print the current speed (new line)
-// void Finger::printSpeed(bool newL)
-//{
-//	MYSERIAL.print("Speed ");
-//	MYSERIAL.print(readSpeed());
-//	MYSERIAL.print("  ");
-//	if (newL)
-//		MYSERIAL.print("\n");
-// }
-//
-//// print current position, direction, speed and whether the target position
-/// has been reached
-// void Finger::printDetails(void)
-//{
-//	MYSERIAL.print("Finger ");
-//	MYSERIAL.print(_fingerIndex);
-//	MYSERIAL.print("  ");
-//	printPos();
-//	printDir();
-//	printSpeed();
-//	printReached(true);		// print new line after
-//
-// }
-//
-//// print finger number, pins and limits
-// void Finger::printConfig(void)
-//{
-//	MYSERIAL.print("Finger");
-//	MYSERIAL.print(_fingerIndex);
-//	MYSERIAL.print(" -");
-//	MYSERIAL.print(" \tdir0: ");
-//	MYSERIAL.print(_pin.dir[0]);
-//	MYSERIAL.print(" \tdir1: ");
-//	MYSERIAL.print(_pin.dir[1]);
-//	MYSERIAL.print(" \tposSense: ");
-//	MYSERIAL.print(_pin.posSns);
-// #ifdef FORCE_SENSE
-//	MYSERIAL.print(" \tforceSense: ");
-//	MYSERIAL.print(_pin.forceSns);
-// #endif
-//	MYSERIAL.print("\tinvert: ");
-//	MYSERIAL.println(_invert);
-//
-//	MYSERIAL.print("MinPos: ");
-//	MYSERIAL.print(_pos.limit.min);
-//	MYSERIAL.print("\tMaxPos: ");
-//	MYSERIAL.println(_pos.limit.max);
-//
-//	MYSERIAL.print("MinSpeed: ");
-//	MYSERIAL.print(_PWM.limit.min);
-//	MYSERIAL.print("\tMaxSpeed: ");
-//	MYSERIAL.println(_PWM.limit.max);
-//
-// #ifdef FORCE_SENSE
-//	MYSERIAL.print("MinForce: ");
-//	MYSERIAL.print(_force.limit.min);
-//	MYSERIAL.print("\tMaxForce: ");
-//	MYSERIAL.println(_force.limit.max);
-// #endif
-//
-//
-//	MYSERIAL.print("\n");
-// }
-
-//
 void Finger::control() {
   // read finger position (reads to _pos.curr internally() )
   readPos();
 
   // read finger speed (including calculating the vel)
   readSpeed();
-
-  // #ifdef FORCE_SENSE
-  //	// if force sense is enabled, run force control
-  //	if (_forceSnsEn)
-  //	{
-  //		forceController();
-  //	}
-  //
-  // #endif
 
 #ifdef FORCE_SENSE
   if (_forceSnsEn && _motorEn) {
@@ -756,13 +602,6 @@ bool Finger::stallDetection(void) {
       _pos.targ = _pos.curr;
       _pos.error = (_pos.targ - _pos.curr);
 
-      // #define MYSERIAL SerialUSB
-      //			MYSERIAL.print("\nF");
-      //			MYSERIAL.print(_fingerIndex);
-      //			MYSERIAL.print(": stall detected. Setting to ");
-      //			MYSERIAL.println(_pos.targ);
-      //			MYSERIAL.print("\n");
-
       return true;
     }
   } else {
@@ -803,29 +642,6 @@ void Finger::forceController(void) {
 
     _force.limit.reached = true;
   }
-
-  //// if a target force is set, move until force has been reached
-  // if (_force.targ != 0)
-  //{
-  //	// if target force limit has been reached
-  //	if (_force.curr > _force.targ)
-  //	{
-  //		MYSERIAL.print("F");
-  //		MYSERIAL.print(_fingerIndex);
-  //		MYSERIAL.println(" target force");
-
-  //		_force.limit.reached = true;
-  //		_force.targ = 0;
-  //	}
-  //	// if target force has not been reached
-  //	else
-  //	{
-  //		// move pos in either the direction determined by _targForceDir
-  // in steps of size force_pos_increment
-  // movePos(-force_pos_increment +
-  //(_targForceDir * (2 * force_pos_increment)));
-  //	}
-  //}
 }
 
 #endif
@@ -910,8 +726,6 @@ void setPWMFreq(uint8_t pin, uint8_t value) {
   timerNum = PWM_pin_to_timer(pin);
   switch (timerNum) {
   case 0:
-    // TCCR0B = (TCCR0B & 0xF8) | value;  // CHANGING THIS TIMER FREQUENCY WILL
-    // BREAK delay()
     break;
   case 1:
     TCCR1B = (TCCR1B & 0xF8) | value;
