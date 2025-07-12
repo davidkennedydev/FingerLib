@@ -11,17 +11,17 @@ ARDUINO_INCLUDE=\
 								-I deps/ArduinoCore-avr/variants/mega/ \
 
 # Find all implementation files excluding non AVR archs (eg: samd)
-EXECUTABLES= ${shell find src -type f -name *.cpp \
-						 -not -path */samd_*}
+EXECUTABLES= $(shell find src -type f -name *.cpp \
+						 -not -path */samd_*)
 
 .PHONY: clean
 
-all: ${patsubst src/%.cpp,build/%.o,${EXECUTABLES}} | build
+all: $(patsubst src/%.cpp,build/%.o,$(EXECUTABLES)) | build
 
 
 build/%.o: src/%.cpp | build
-	mkdir -p ${dir $@}
-	${CXX} ${CXX_FLAGS} ${MCU_FLAGS} ${ARDUINO_INCLUDE} -c\
+	mkdir -p $(dir $@)
+	$(CXX) $(CXX_FLAGS) $(MCU_FLAGS) $(ARDUINO_INCLUDE) -c\
 	 	$< -o $@
 
 build:
