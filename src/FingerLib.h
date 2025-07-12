@@ -79,7 +79,7 @@ constexpr size_t MAX_FINGERS = 6; // maximum number of fingers
 #define MAX_FINGER_POS 973             // maximum motor position
 #define MIN_FINGER_POS 50              // minimum motor position
 
-#define POS_REACHED_TOLERANCE 50 // tolerance for posReached()
+static constexpr auto POS_REACHED_TOLERANCE = 50; // tolerance for posReached()
 
 #if defined(FORCE_SENSE)
 // STALL DETECTION
