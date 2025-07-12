@@ -12,20 +12,24 @@
 
 #include "FingerLib.h"
 
-uint8_t _TotalFingerCount = 0; // the total number of finger instances
-uint8_t _TotalAttachedFingers =
+static uint8_t _TotalFingerCount = 0; // the total number of finger instances
+static uint8_t _TotalAttachedFingers =
     0; // the total number of attached/configured fingers
 
-Finger *fingerISRList[MAX_FINGERS] = {
+static Finger *fingerISRList[MAX_FINGERS] = {
     NULL}; // pointer to an instance of the Finger class
-bool _posCtrlTimerInit =
+static bool _posCtrlTimerInit =
     false; // flag to prevent multiple timer initialisations
+
+constexpr bool isTooManyFingersInitialized(uint8_t index) {
+  return index >= MAX_FINGERS;
+}
 
 ////////////////////////////// Constructor/Destructor
 /////////////////////////////////
 Finger::Finger() {
-  if (_fingerIndex >= MAX_FINGERS) // if too many fingers have been initialised
-  {
+  if (isTooManyFingersInitialized(_fingerIndex)) {
+    // TODO: Negative values shouldn't be used with unsiged types
     _fingerIndex = -1; // set current finger number to be empty
     _isActive = false; // set current finger as inactive
   } else {
@@ -66,83 +70,81 @@ uint8_t Finger::attach(uint8_t dir0, uint8_t dir1, uint8_t posSns, bool inv) {
 // the direction to be inverted
 uint8_t Finger::attach(uint8_t dir0, uint8_t dir1, uint8_t posSns,
                        uint8_t forceSns, bool inv) {
-  // if the current finger number is valid
-  if ((_fingerIndex >= 0) && (_fingerIndex < MAX_FINGERS)) {
-    motorEnable(false); // disable the motor
+  if (isTooManyFingersInitialized(_fingerIndex)) {
+    _isActive = false; // set the current finger to be inactive
+    // TODO: Negative values shouldn't be used with unsiged types
+    return (uint8_t)(-1); // return BLANK
+  }
 
-    // attach all finger pins
-    _pin.dir[0] = dir0;
-    _pin.dir[1] = dir1;
-    _pin.posSns = posSns;
+  motorEnable(false); // disable the motor
+
+  // attach all finger pins
+  _pin.dir[0] = dir0;
+  _pin.dir[1] = dir1;
+  _pin.posSns = posSns;
 #ifdef FORCE_SENSE
-    _pin.forceSns = forceSns;
+  _pin.forceSns = forceSns;
 #endif
-    _invert = inv; // store whether to invert the finger direction
+  _invert = inv; // store whether to invert the finger direction
 
-    // configure pins
-    pinMode(dir0, OUTPUT);  // set direction1 pin to output
-    pinMode(dir1, OUTPUT);  // set direction2 pin to output
-    pinMode(posSns, INPUT); // set position sense pin to input
+  // configure pins
+  pinMode(dir0, OUTPUT);  // set direction1 pin to output
+  pinMode(dir1, OUTPUT);  // set direction2 pin to output
+  pinMode(posSns, INPUT); // set position sense pin to input
 #ifdef FORCE_SENSE
-    pinMode(forceSns, INPUT); // set force sense pin to input
+  pinMode(forceSns, INPUT); // set force sense pin to input
 #endif
 
-    // initialise circle buffer
-    _velBuff.begin(VEL_BUFF_SIZE);
+  // initialise circle buffer
+  _velBuff.begin(VEL_BUFF_SIZE);
 #if defined(FORCE_SENSE)
-    _IBuff.begin(CURR_SENSE_BUFF_SIZE);
+  _IBuff.begin(CURR_SENSE_BUFF_SIZE);
 #endif
 
-    // set limits and initial values
-    setPosLimits(MIN_FINGER_POS, MAX_FINGER_POS);
-    setPWMLimits(MIN_FINGER_PWM, MAX_FINGER_PWM);
-    writeDir(OPEN);
-    writeSpeed(MAX_FINGER_PWM);
+  // set limits and initial values
+  setPosLimits(MIN_FINGER_POS, MAX_FINGER_POS);
+  setPWMLimits(MIN_FINGER_PWM, MAX_FINGER_PWM);
+  writeDir(OPEN);
+  writeSpeed(MAX_FINGER_PWM);
 #ifdef FORCE_SENSE
-    forceSenseEnable(true);
+  forceSenseEnable(true);
 #endif
 
-    // if finger is being attached for the first time
-    if (!_isActive) {
-      _TotalAttachedFingers++; // update the count of total attached fingers
+  // if finger is being attached for the first time
+  if (!_isActive) {
+    _TotalAttachedFingers++; // update the count of total attached fingers
+  }
+
+  // add a pointer to the current finger instance to the list for position
+  // control calls, used by the ISR
+  fingerISRList[_fingerIndex] = this;
+
+  // initialise the position control timer
+  if (!_posCtrlTimerInit) {
+    if (_interruptEn) // if the interrupt is enabled for motor control
+    {
+      _passMotorPtr(&_fingerControlCallback); // attach the finger control
+                                              // function to the timer
     }
 
-    // add a pointer to the current finger instance to the list for position
-    // control calls, used by the ISR
-    fingerISRList[_fingerIndex] = this;
-
-    // initialise the position control timer
-    if (!_posCtrlTimerInit) {
-      if (_interruptEn) // if the interrupt is enabled for motor control
-      {
-        _passMotorPtr(&_fingerControlCallback); // attach the finger control
-                                                // function to the timer
-      }
-
-      _posCtrlTimerSetup(); // initialise and start the timer
-      _posCtrlTimerInit = true;
-    }
+    _posCtrlTimerSetup(); // initialise and start the timer
+    _posCtrlTimerInit = true;
+  }
 
 #ifdef FORCE_SENSE
-    // attach current sense control interrupt, initialise and sync PWM timers
-    initCurrentSense(_pin.dir[0], _pin.dir[1], &_currentSenseCallback);
+  // attach current sense control interrupt, initialise and sync PWM timers
+  initCurrentSense(_pin.dir[0], _pin.dir[1], &_currentSenseCallback);
 #endif
 
 #ifdef ARDUINO_AVR_MEGA2560
-    // if using the Atmega2560, set the PWM freq to > 20kHz to prevent humming
-    setPWMFreq(dir0, 0x01); // set PWM frequency to max freq
-    setPWMFreq(dir1, 0x01); // set PWM frequency to max freq
+  // if using the Atmega2560, set the PWM freq to > 20kHz to prevent humming
+  setPWMFreq(dir0, 0x01); // set PWM frequency to max freq
+  setPWMFreq(dir1, 0x01); // set PWM frequency to max freq
 #endif
 
-    motorEnable(true);   // re-enable the motor
-    _isActive = true;    // set the current finger to be active
-    return _fingerIndex; // return the current finger number
-  } else                 // if the current finger number isn't valid
-  {
-    // MYSERIAL.println("ERROR - Too many fingers attached");
-    _isActive = false;    // set the current finger to be inactive
-    return (uint8_t)(-1); // return BLANK
-  }
+  motorEnable(true);   // re-enable the motor
+  _isActive = true;    // set the current finger to be active
+  return _fingerIndex; // return the current finger number
 }
 
 // deactivate the finger
@@ -878,6 +880,8 @@ void _fingerControlCallback(void) {
                                  // attached Finger instance
   }
 
+  // TODO: Something is terribly wrong, it's not about just disconected finger
+  // but also fingers with the wrong index
   i++;
   if (i > _TotalAttachedFingers) {
     i = 0;

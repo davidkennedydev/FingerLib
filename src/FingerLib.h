@@ -21,10 +21,6 @@
 // control
 #define USE_PID
 
-// Uncomment the following to enable force/current sensing (Arduino Zero &
-// Chestnut PCB Only) (Automatically enabled when using Chestnut PCB)
-// #define FORCE_SENSE
-
 // GENERIC LIBRARIES
 #include "buffer/CircleBuff.h"
 #include "timers/timer_and_delay.h"
@@ -62,14 +58,7 @@
 #define RIGHT 1 // hand type
 #define LEFT 2  // hand type
 
-// FINGERS
-#define MAX_FINGERS 6 // maximum number of fingers
-#define F0 0
-#define F1 1
-#define F2 2
-#define F3 3
-#define F4 4
-#define F5 5
+constexpr size_t MAX_FINGERS = 6; // maximum number of fingers
 
 // BOARD SETTINGS
 #define MAX_ADC_RES 1023 // maximum resolution of the ADC for pos sensing
