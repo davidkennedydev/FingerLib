@@ -14,20 +14,24 @@
 
 #include "FingerLib.h"
 
-uint8_t _TotalFingerCount = 0; // the total number of finger instances
-uint8_t _TotalAttachedFingers =
+static uint8_t _TotalFingerCount = 0; // the total number of finger instances
+static uint8_t _TotalAttachedFingers =
     0; // the total number of attached/configured fingers
 
-Finger *fingerISRList[MAX_FINGERS] = {
-    NULL}; // pointer to an instance of the Finger class
-bool _posCtrlTimerInit =
+static Finger *fingerISRList[MAX_FINGERS] = {
+    nullptr}; // pointer to an instance of the Finger class
+static bool _posCtrlTimerInit =
     false; // flag to prevent multiple timer initialisations
+
+constexpr bool isTooManyFingersInitialized(uint8_t index) {
+  return index >= MAX_FINGERS;
+}
 
 ////////////////////////////// Constructor/Destructor
 /////////////////////////////////
 Finger::Finger() {
-  if (_fingerIndex >= MAX_FINGERS) // if too many fingers have been initialised
-  {
+  if (isTooManyFingersInitialized(_fingerIndex)) {
+    // TODO: Negative values shouldn't be used with unsiged types
     _fingerIndex = -1; // set current finger number to be empty
     _isActive = false; // set current finger as inactive
   } else {
@@ -68,96 +72,95 @@ uint8_t Finger::attach(uint8_t dir0, uint8_t dir1, uint8_t posSns, bool inv) {
 // the direction to be inverted
 uint8_t Finger::attach(uint8_t dir0, uint8_t dir1, uint8_t posSns,
                        uint8_t forceSns, bool inv) {
-  // if the current finger number is valid
-  if ((_fingerIndex >= 0) && (_fingerIndex < MAX_FINGERS)) {
-    motorEnable(false); // disable the motor
+  if (isTooManyFingersInitialized(_fingerIndex)) {
+    _isActive = false; // set the current finger to be inactive
+    // TODO: Negative values shouldn't be used with unsiged types
+    return (uint8_t)(-1); // return BLANK
+  }
 
-    // attach all finger pins
-    _pin.dir[0] = dir0;
-    _pin.dir[1] = dir1;
-    _pin.posSns = posSns;
+  motorEnable(false); // disable the motor
+
+  // attach all finger pins
+  _pin.dir[0] = dir0;
+  _pin.dir[1] = dir1;
+  _pin.posSns = posSns;
 #ifdef FORCE_SENSE
-    _pin.forceSns = forceSns;
+  _pin.forceSns = forceSns;
 #endif
-    _invert = inv; // store whether to invert the finger direction
+  _invert = inv; // store whether to invert the finger direction
 
-    // configure pins
-    pinMode(dir0, OUTPUT);  // set direction1 pin to output
-    pinMode(dir1, OUTPUT);  // set direction2 pin to output
-    pinMode(posSns, INPUT); // set position sense pin to input
+  // configure pins
+  pinMode(dir0, OUTPUT);  // set direction1 pin to output
+  pinMode(dir1, OUTPUT);  // set direction2 pin to output
+  pinMode(posSns, INPUT); // set position sense pin to input
 #ifdef FORCE_SENSE
-    pinMode(forceSns, INPUT); // set force sense pin to input
+  pinMode(forceSns, INPUT); // set force sense pin to input
 #endif
 
-    // initialise circle buffer
-    _velBuff.begin(VEL_BUFF_SIZE);
+  // initialise circle buffer
+  _velBuff.begin(VEL_BUFF_SIZE);
 #if defined(FORCE_SENSE)
-    _IBuff.begin(CURR_SENSE_BUFF_SIZE);
+  _IBuff.begin(CURR_SENSE_BUFF_SIZE);
 #endif
 
-    // set limits and initial values
-    setPosLimits(MIN_FINGER_POS, MAX_FINGER_POS);
-    setPWMLimits(MIN_FINGER_PWM, MAX_FINGER_PWM);
-    writeDir(OPEN);
-    writeSpeed(MAX_FINGER_PWM);
+  // set limits and initial values
+  setPosLimits(MIN_FINGER_POS, MAX_FINGER_POS);
+  setPWMLimits(MIN_FINGER_PWM, MAX_FINGER_PWM);
+  writeDir(OPEN);
+  writeSpeed(MAX_FINGER_PWM);
 #ifdef FORCE_SENSE
-    forceSenseEnable(true);
+  forceSenseEnable(true);
 #endif
 
-    // if finger is being attached for the first time
-    if (!_isActive) {
-      _TotalAttachedFingers++; // update the count of total attached fingers
+  // if finger is being attached for the first time
+  if (!_isActive) {
+    _TotalAttachedFingers++; // update the count of total attached fingers
+  }
+
+  // add a pointer to the current finger instance to the list for position
+  // control calls, used by the ISR
+  fingerISRList[_fingerIndex] = this;
+
+  // initialise the position control timer
+  if (!_posCtrlTimerInit) {
+    if (_interruptEn) // if the interrupt is enabled for motor control
+    {
+      _passMotorPtr(&_fingerControlCallback); // attach the finger control
+                                              // function to the timer
     }
 
-    // add a pointer to the current finger instance to the list for position
-    // control calls, used by the ISR
-    fingerISRList[_fingerIndex] = this;
-
-    // initialise the position control timer
-    if (!_posCtrlTimerInit) {
-      if (_interruptEn) // if the interrupt is enabled for motor control
-      {
-        _passMotorPtr(&_fingerControlCallback); // attach the finger control
-                                                // function to the timer
-      }
-
-      _posCtrlTimerSetup(); // initialise and start the timer
-      _posCtrlTimerInit = true;
-    }
+    _posCtrlTimerSetup(); // initialise and start the timer
+    _posCtrlTimerInit = true;
+  }
 
 #ifdef FORCE_SENSE
-    // attach current sense control interrupt, initialise and sync PWM timers
-    initCurrentSense(_pin.dir[0], _pin.dir[1], &_currentSenseCallback);
+  // attach current sense control interrupt, initialise and sync PWM timers
+  initCurrentSense(_pin.dir[0], _pin.dir[1], &_currentSenseCallback);
 #endif
 
 #ifdef ARDUINO_AVR_MEGA2560
-    // if using the Atmega2560, set the PWM freq to > 20kHz to prevent humming
-    setPWMFreq(dir0, 0x01); // set PWM frequency to max freq
-    setPWMFreq(dir1, 0x01); // set PWM frequency to max freq
+  // change the PWM timer frequency to be out of the audible range
+  constexpr auto max_frequency = 0x01; // > 20kHz to prevent humming
+  setPWMFreq(dir0, max_frequency);
+  setPWMFreq(dir1, max_frequency);
 #endif
 
-    motorEnable(true);   // re-enable the motor
-    _isActive = true;    // set the current finger to be active
-    return _fingerIndex; // return the current finger number
-  } else                 // if the current finger number isn't valid
-  {
-    // MYSERIAL.println("ERROR - Too many fingers attached");
-    _isActive = false;    // set the current finger to be inactive
-    return (uint8_t)(-1); // return BLANK
-  }
+  motorEnable(true);   // re-enable the motor
+  _isActive = true;    // set the current finger to be active
+  return _fingerIndex; // return the current finger number
 }
 
 // deactivate the finger
-void Finger::detach(void) {
+void Finger::detach() {
   _isActive = false;
   _TotalAttachedFingers--;
 }
 
 // return true if the current finger is attached and initialised correctly
-bool Finger::attached(void) { return _isActive; }
+bool Finger::attached() { return _isActive; }
 
 // invert the current finger direction
-void Finger::invertFingerDir(void) { _invert = !_invert; }
+void Finger::invertFingerDir() { _invert = !_invert; }
 
 // LIMITS
 
@@ -190,22 +193,19 @@ void Finger::setForceLimits(int min, int max) {
 }
 #endif
 
-// POS
-
 // write a target position to the finger
 void Finger::writePos(int value) {
-  // constrain position value to limits
-  _pos.targ = constrain((uint16_t)value, _pos.limit.min, _pos.limit.max);
+  // TODO check if value should really be signed, it is being casted to a
+  // unsiged type on all usages
+  const uint16_t position = value;
+
+  _pos.targ = constrain(position, _pos.limit.min, _pos.limit.max);
 
   // calculate new position error (to remove false positives in reachedPos() )
   _pos.error = (_pos.targ - _pos.curr);
 
   // determine direction of travel
-  if ((uint16_t)value > _pos.curr) {
-    _dir.targ = CLOSE;
-  } else {
-    _dir.targ = OPEN;
-  }
+  _dir.targ = (position > _pos.curr) ? CLOSE : OPEN;
 }
 
 // write a change in position to the finger
@@ -221,7 +221,7 @@ void Finger::movePos(int value) {
 }
 
 // return the current position
-int16_t Finger::readPos(void) {
+int16_t Finger::readPos() {
   // read finger position
   noInterrupts();
   _pos.curr = analogRead(_pin.posSns);
@@ -236,30 +236,18 @@ int16_t Finger::readPos(void) {
 }
 
 // return the error between the current position and the target position
-int16_t Finger::readPosError(void) { return _pos.error; }
+int16_t Finger::readPosError() { return _pos.error; }
 
 // return the target position
-uint16_t Finger::readTargetPos(void) { return _pos.targ; }
+uint16_t Finger::readTargetPos() { return _pos.targ; }
 
-// returns true if position reached
-bool Finger::reachedPos(void) {
-  // if the position error is within a default tolerance
-  if (abs(readPosError()) < POS_REACHED_TOLERANCE) {
-    return true;
-  } else {
-    return false;
-  }
-}
-
-// returns true if position reached
+// returns true if position reached within a tolerance
 bool Finger::reachedPos(uint16_t posErr) {
-  // if the position error is within a tolerance
-  if (abs(readPosError()) < (int16_t)posErr) {
-    return true;
-  } else {
-    return false;
-  }
+  return abs(readPosError()) < posErr;
 }
+
+// returns true if position reached
+bool Finger::reachedPos() { return reachedPos(POS_REACHED_TOLERANCE); }
 
 // DIR
 
@@ -277,19 +265,20 @@ void Finger::writeDir(int value) {
 }
 
 // return the current direction
-uint8_t Finger::readDir(void) { return _dir.targ; }
+uint8_t Finger::readDir() { return _dir.targ; }
 
 // open the finger
-void Finger::open(void) { writePos(_pos.limit.min); }
+void Finger::open() { writePos(_pos.limit.min); }
 
 // close the finger
-void Finger::close(void) { writePos(_pos.limit.max); }
+void Finger::close() { writePos(_pos.limit.max); }
 
 // toggle finger between open/closed
-void Finger::open_close(void) { open_close(!readDir()); }
+void Finger::open_close() { open_close(!readDir()); }
 
 // set finger to open/close
 void Finger::open_close(boolean dir) {
+
   if (dir == OPEN) {
     open();
   } else if (dir == CLOSE) {
@@ -301,6 +290,8 @@ void Finger::open_close(boolean dir) {
 
 // write a target speed to the finger
 void Finger::writeSpeed(int value) {
+  // TODO check if value should really be signed, it is being casted to a
+  // unsiged type on all usages
   _speed.targ = constrain((int16_t)value, -_PWM.limit.max,
                           _PWM.limit.max); // store vectorised speed
   _PWM.targ = _speed.targ;
@@ -311,29 +302,23 @@ void Finger::writeSpeed(int value) {
 }
 
 // return the current movement speed
-float Finger::readSpeed(void) {
-  // pauseInterrupt();				// pause 'control()' interrupt
-  // to prevent a race condition
-
+float Finger::readSpeed() {
   calcVel(); // read finger speed (ADC/per)
   _velBuff.write(_speed.raw);
   _speed.prev = _speed.curr;
   _speed.curr = _velBuff.readMean();
 
-  // resumeInterrupt();			// resume 'control()' interrupt to
-  // prevent a race condition
-
   return _speed.raw;
 }
 
 // return the target movement speed
-float Finger::readTargetSpeed(void) { return _speed.targ; }
+float Finger::readTargetSpeed() { return _speed.targ; }
 
 // return the current speed being written to the finger
-int Finger::readPWM(void) { return _PWM.curr; }
+int Finger::readPWM() { return _PWM.curr; }
 
 // return the target speed
-int Finger::readTargetPWM(void) { return _PWM.targ; }
+int Finger::readTargetPWM() { return _PWM.targ; }
 
 #ifdef FORCE_SENSE
 // FORCE
@@ -415,7 +400,7 @@ int Finger::convertForceToADC(float force) {
 // STOP/START
 
 // stop the motor and hold position
-void Finger::stopMotor(void) {
+void Finger::stopMotor() {
   // set target position to current position
   writePos(readPos());
 }
@@ -432,7 +417,7 @@ void Finger::motorEnable(bool en) {
 }
 
 // return true if the motor is enabled
-bool Finger::enabled(void) { return _motorEn; }
+bool Finger::enabled() { return _motorEn; }
 
 #ifdef FORCE_SENSE
 // set force sensing to be enabled/disabled
@@ -440,7 +425,7 @@ void Finger::forceSenseEnable(bool en) { _forceSnsEn = en; }
 #endif
 
 // enable timer interrupt for motor control
-void Finger::enableInterrupt(void) {
+void Finger::enableInterrupt() {
   _passMotorPtr(&_fingerControlCallback); // attach the finger control function
                                           // to the timer
 
@@ -448,167 +433,19 @@ void Finger::enableInterrupt(void) {
 }
 
 // disable timer interrupt for motor control
-void Finger::disableInterrupt(void) {
+void Finger::disableInterrupt() {
   _passMotorPtr(
-      NULL); // prevent the interrupt from calling the motor control function
+      nullptr); // prevent the interrupt from calling the motor control function
 
   _interruptEn = false;
 }
 
-// PRINT
-
-//// print the current position (no new line)
-// void Finger::printPos(void)
-//{
-//	printPos(0);
-// }
-//
-//// print the current position (new line)
-// void Finger::printPos(bool newL)
-//{
-//	MYSERIAL.print("Pos ");
-//	MYSERIAL.print(readPos());
-//	MYSERIAL.print("  ");
-//	if (newL)
-//		MYSERIAL.print("\n");
-// }
-//
-//// print the current position error (no new line)
-// void Finger::printPosError(void)
-//{
-//	printPosError(0);
-// }
-//
-//// print the current position error (new line)
-// void Finger::printPosError(bool newL)
-//{
-//	MYSERIAL.print("Err ");
-//	MYSERIAL.print(readPosError());
-//	MYSERIAL.print("  ");
-//	if (newL)
-//		MYSERIAL.print("\n");
-// }
-//
-//// print the current direction (no new line)
-// void Finger::printDir(void)
-//{
-//	printDir(0);
-// }
-//
-//// print the current direction (new line)
-// void Finger::printDir(bool newL)
-//{
-//	const char* _dirString[2] = { "OPEN","CLOSE" };	// direction string
-//
-//	MYSERIAL.print("Dir ");
-//	MYSERIAL.print(_dirString[readDir()]);
-//	MYSERIAL.print("  ");
-//	if (newL)
-//		MYSERIAL.print("\n");
-// }
-//
-//// print whether the target position has been reached (no new line)
-// void Finger::printReached(void)
-//{
-//	printReached(0);
-// }
-//
-//// print whether the target position has been reached (new line)
-// void Finger::printReached(bool newL)
-//{
-//	MYSERIAL.print("Reached ");
-//	MYSERIAL.print(reachedPos());
-//	MYSERIAL.print("  ");
-//	if (newL)
-//		MYSERIAL.print("\n");
-// }
-//
-//// print the current speed (no new line)
-// void Finger::printSpeed(void)
-//{
-//	printSpeed(0);
-// }
-//
-//// print the current speed (new line)
-// void Finger::printSpeed(bool newL)
-//{
-//	MYSERIAL.print("Speed ");
-//	MYSERIAL.print(readSpeed());
-//	MYSERIAL.print("  ");
-//	if (newL)
-//		MYSERIAL.print("\n");
-// }
-//
-//// print current position, direction, speed and whether the target position
-/// has been reached
-// void Finger::printDetails(void)
-//{
-//	MYSERIAL.print("Finger ");
-//	MYSERIAL.print(_fingerIndex);
-//	MYSERIAL.print("  ");
-//	printPos();
-//	printDir();
-//	printSpeed();
-//	printReached(true);		// print new line after
-//
-// }
-//
-//// print finger number, pins and limits
-// void Finger::printConfig(void)
-//{
-//	MYSERIAL.print("Finger");
-//	MYSERIAL.print(_fingerIndex);
-//	MYSERIAL.print(" -");
-//	MYSERIAL.print(" \tdir0: ");
-//	MYSERIAL.print(_pin.dir[0]);
-//	MYSERIAL.print(" \tdir1: ");
-//	MYSERIAL.print(_pin.dir[1]);
-//	MYSERIAL.print(" \tposSense: ");
-//	MYSERIAL.print(_pin.posSns);
-// #ifdef FORCE_SENSE
-//	MYSERIAL.print(" \tforceSense: ");
-//	MYSERIAL.print(_pin.forceSns);
-// #endif
-//	MYSERIAL.print("\tinvert: ");
-//	MYSERIAL.println(_invert);
-//
-//	MYSERIAL.print("MinPos: ");
-//	MYSERIAL.print(_pos.limit.min);
-//	MYSERIAL.print("\tMaxPos: ");
-//	MYSERIAL.println(_pos.limit.max);
-//
-//	MYSERIAL.print("MinSpeed: ");
-//	MYSERIAL.print(_PWM.limit.min);
-//	MYSERIAL.print("\tMaxSpeed: ");
-//	MYSERIAL.println(_PWM.limit.max);
-//
-// #ifdef FORCE_SENSE
-//	MYSERIAL.print("MinForce: ");
-//	MYSERIAL.print(_force.limit.min);
-//	MYSERIAL.print("\tMaxForce: ");
-//	MYSERIAL.println(_force.limit.max);
-// #endif
-//
-//
-//	MYSERIAL.print("\n");
-// }
-
-//
-void Finger::control(void) {
+void Finger::control() {
   // read finger position (reads to _pos.curr internally() )
   readPos();
 
   // read finger speed (including calculating the vel)
   readSpeed();
-
-  // #ifdef FORCE_SENSE
-  //	// if force sense is enabled, run force control
-  //	if (_forceSnsEn)
-  //	{
-  //		forceController();
-  //	}
-  //
-  // #endif
 
 #ifdef FORCE_SENSE
   if (_forceSnsEn && _motorEn) {
@@ -623,7 +460,7 @@ void Finger::control(void) {
 
 #if defined(USE_PID)
 // position controller (using PID)
-void Finger::positionController(void) {
+void Finger::positionController() {
   // run pos PID controller to calculate target speed
   _speed.targ = _PID.run(_pos.targ, _pos.curr);
 
@@ -762,13 +599,6 @@ bool Finger::stallDetection(void) {
       _pos.targ = _pos.curr;
       _pos.error = (_pos.targ - _pos.curr);
 
-      // #define MYSERIAL SerialUSB
-      //			MYSERIAL.print("\nF");
-      //			MYSERIAL.print(_fingerIndex);
-      //			MYSERIAL.print(": stall detected. Setting to ");
-      //			MYSERIAL.println(_pos.targ);
-      //			MYSERIAL.print("\n");
-
       return true;
     }
   } else {
@@ -809,35 +639,12 @@ void Finger::forceController(void) {
 
     _force.limit.reached = true;
   }
-
-  //// if a target force is set, move until force has been reached
-  // if (_force.targ != 0)
-  //{
-  //	// if target force limit has been reached
-  //	if (_force.curr > _force.targ)
-  //	{
-  //		MYSERIAL.print("F");
-  //		MYSERIAL.print(_fingerIndex);
-  //		MYSERIAL.println(" target force");
-
-  //		_force.limit.reached = true;
-  //		_force.targ = 0;
-  //	}
-  //	// if target force has not been reached
-  //	else
-  //	{
-  //		// move pos in either the direction determined by _targForceDir
-  // in steps of size force_pos_increment
-  // movePos(-force_pos_increment +
-  //(_targForceDir * (2 * force_pos_increment)));
-  //	}
-  //}
 }
 
 #endif
 
 // calculate the velocity of the motor
-void Finger::calcVel(void) {
+void Finger::calcVel() {
   // if the duration timer is currently running
   // if (_velTimer.started())
   // if (_velTimer.now() > 100000)		// 100ms
@@ -872,14 +679,16 @@ void Finger::calcVel(void) {
 
 // runs the control() function of a Finger instance at each call by the timer
 // interrupt
-void _fingerControlCallback(void) {
+void _fingerControlCallback() {
   static int i = 0;
 
-  if (fingerISRList[i] != NULL) {
+  if (fingerISRList[i] != nullptr) {
     fingerISRList[i]->control(); // run the control() member function of each
                                  // attached Finger instance
   }
 
+  // TODO: Something is terribly wrong, it's not about just disconected finger
+  // but also fingers with the wrong index
   i++;
   if (i > _TotalAttachedFingers) {
     i = 0;
@@ -907,33 +716,17 @@ void _currentSenseCallback(void) {
 #endif
 
 #ifdef ARDUINO_AVR_MEGA2560
-// change the PWM timer frequency to be out of the audible range
-void setPWMFreq(uint8_t pin, uint8_t value) {
-  uint8_t timerNum;
 
-  timerNum = PWM_pin_to_timer(pin);
-  switch (timerNum) {
-  case 0:
-    // TCCR0B = (TCCR0B & 0xF8) | value;  // CHANGING THIS TIMER FREQUENCY WILL
-    // BREAK delay()
-    break;
-  case 1:
-    TCCR1B = (TCCR1B & 0xF8) | value;
-    break;
-  case 2:
-    TCCR2B = (TCCR2B & 0xF8) | value;
-    break;
-  case 3:
-    TCCR3B = (TCCR3B & 0xF8) | value;
-    break;
-  case 4:
-    TCCR4B = (TCCR4B & 0xF8) | value;
-    break;
-  case 5:
-    TCCR5B = (TCCR5B & 0xF8) | value;
-    break;
-  default:
-    break;
+void setPWMFreq(const uint8_t pin, const uint8_t value) {
+  static volatile uint8_t *const timers[] = {nullptr, &TCCR1B, &TCCR2B,
+                                             &TCCR3B, &TCCR4B, &TCCR5B};
+  // TODO: use an STL with constexpr std::array to replace macros and size_of's
+  constexpr auto max_timer_id = sizeof(timers) / sizeof(timers[0]);
+  const uint8_t timer_id = PWM_pin_to_timer(pin);
+  if (timer_id > 0 && timer_id <= max_timer_id) {
+    auto &timer = *timers[timer_id];
+    timer = (timer & 0b11111000) | value;
   }
 }
+
 #endif

@@ -1,5 +1,5 @@
 CXX=avr-g++
-CXX_FLAGS=-Os
+CXX_FLAGS=-Os -std=c++26
 MCU_FLAGS=\
 					-mmcu=atmega2560 \
 					-D F_CPU=16000000UL \
