@@ -8,6 +8,8 @@
  * International License. To view a copy of this license, visit
  * http://creativecommons.org/licenses/by/4.0/.
  *
+ * Modified by David Kennedy S. Araujo (software@davidkennedy.dev) to clean code
+ *
  */
 
 #include "FingerLib.h"
