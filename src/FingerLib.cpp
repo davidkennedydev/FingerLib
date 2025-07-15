@@ -17,7 +17,7 @@ static uint8_t _TotalAttachedFingers =
     0; // the total number of attached/configured fingers
 
 static Finger *fingerISRList[MAX_FINGERS] = {
-    NULL}; // pointer to an instance of the Finger class
+    nullptr}; // pointer to an instance of the Finger class
 static bool _posCtrlTimerInit =
     false; // flag to prevent multiple timer initialisations
 
@@ -137,9 +137,10 @@ uint8_t Finger::attach(uint8_t dir0, uint8_t dir1, uint8_t posSns,
 #endif
 
 #ifdef ARDUINO_AVR_MEGA2560
-  // if using the Atmega2560, set the PWM freq to > 20kHz to prevent humming
-  setPWMFreq(dir0, 0x01); // set PWM frequency to max freq
-  setPWMFreq(dir1, 0x01); // set PWM frequency to max freq
+  // change the PWM timer frequency to be out of the audible range
+  constexpr auto max_frequency = 0x01; // > 20kHz to prevent humming
+  setPWMFreq(dir0, max_frequency);
+  setPWMFreq(dir1, max_frequency);
 #endif
 
   motorEnable(true);   // re-enable the motor
@@ -192,18 +193,17 @@ void Finger::setForceLimits(int min, int max) {
 
 // write a target position to the finger
 void Finger::writePos(int value) {
-  // constrain position value to limits
-  _pos.targ = constrain((uint16_t)value, _pos.limit.min, _pos.limit.max);
+  // TODO check if value should really be signed, it is being casted to a
+  // unsiged type on all usages
+  const uint16_t position = value;
+
+  _pos.targ = constrain(position, _pos.limit.min, _pos.limit.max);
 
   // calculate new position error (to remove false positives in reachedPos() )
   _pos.error = (_pos.targ - _pos.curr);
 
   // determine direction of travel
-  if ((uint16_t)value > _pos.curr) {
-    _dir.targ = CLOSE;
-  } else {
-    _dir.targ = OPEN;
-  }
+  _dir.targ = (position > _pos.curr) ? CLOSE : OPEN;
 }
 
 // write a change in position to the finger
@@ -239,21 +239,13 @@ int16_t Finger::readPosError() { return _pos.error; }
 // return the target position
 uint16_t Finger::readTargetPos() { return _pos.targ; }
 
-
-// returns true if position reached
+// returns true if position reached within a tolerance
 bool Finger::reachedPos(uint16_t posErr) {
-  // if the position error is within a tolerance
-  if (abs(readPosError()) < (int16_t)posErr) {
-    return true;
-  } else {
-    return false;
-  }
+  return abs(readPosError()) < posErr;
 }
 
 // returns true if position reached
-bool Finger::reachedPos() {
-  return reachedPos(POS_REACHED_TOLERANCE);
-}
+bool Finger::reachedPos() { return reachedPos(POS_REACHED_TOLERANCE); }
 
 // DIR
 
@@ -284,6 +276,7 @@ void Finger::open_close() { open_close(!readDir()); }
 
 // set finger to open/close
 void Finger::open_close(boolean dir) {
+
   if (dir == OPEN) {
     open();
   } else if (dir == CLOSE) {
@@ -295,6 +288,8 @@ void Finger::open_close(boolean dir) {
 
 // write a target speed to the finger
 void Finger::writeSpeed(int value) {
+  // TODO check if value should really be signed, it is being casted to a
+  // unsiged type on all usages
   _speed.targ = constrain((int16_t)value, -_PWM.limit.max,
                           _PWM.limit.max); // store vectorised speed
   _PWM.targ = _speed.targ;
@@ -438,7 +433,7 @@ void Finger::enableInterrupt() {
 // disable timer interrupt for motor control
 void Finger::disableInterrupt() {
   _passMotorPtr(
-      NULL); // prevent the interrupt from calling the motor control function
+      nullptr); // prevent the interrupt from calling the motor control function
 
   _interruptEn = false;
 }
@@ -685,7 +680,7 @@ void Finger::calcVel() {
 void _fingerControlCallback() {
   static int i = 0;
 
-  if (fingerISRList[i] != NULL) {
+  if (fingerISRList[i] != nullptr) {
     fingerISRList[i]->control(); // run the control() member function of each
                                  // attached Finger instance
   }
@@ -719,31 +714,17 @@ void _currentSenseCallback(void) {
 #endif
 
 #ifdef ARDUINO_AVR_MEGA2560
-// change the PWM timer frequency to be out of the audible range
-void setPWMFreq(uint8_t pin, uint8_t value) {
-  uint8_t timerNum;
 
-  timerNum = PWM_pin_to_timer(pin);
-  switch (timerNum) {
-  case 0:
-    break;
-  case 1:
-    TCCR1B = (TCCR1B & 0xF8) | value;
-    break;
-  case 2:
-    TCCR2B = (TCCR2B & 0xF8) | value;
-    break;
-  case 3:
-    TCCR3B = (TCCR3B & 0xF8) | value;
-    break;
-  case 4:
-    TCCR4B = (TCCR4B & 0xF8) | value;
-    break;
-  case 5:
-    TCCR5B = (TCCR5B & 0xF8) | value;
-    break;
-  default:
-    break;
+void setPWMFreq(const uint8_t pin, const uint8_t value) {
+  static volatile uint8_t *const timers[] = {nullptr, &TCCR1B, &TCCR2B,
+                                             &TCCR3B, &TCCR4B, &TCCR5B};
+  // TODO: use an STL with constexpr std::array to replace macros and size_of's
+  constexpr auto max_timer_id = sizeof(timers) / sizeof(timers[0]);
+  const uint8_t timer_id = PWM_pin_to_timer(pin);
+  if (timer_id > 0 && timer_id <= max_timer_id) {
+    auto &timer = *timers[timer_id];
+    timer = (timer & 0b11111000) | value;
   }
 }
+
 #endif

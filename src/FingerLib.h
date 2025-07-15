@@ -147,7 +147,7 @@ typedef struct _VectorProperties {
 
 // FINGER CLASS
 class Finger {
-public:
+public: // TODO Review what function members should really be public
   // CONSTRUCTOR
   Finger();
 
